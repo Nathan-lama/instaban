@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:usage_stats/usage_stats.dart'; // Ajout de cet import
+import 'package:usage_stats/usage_stats.dart';
 
 import 'package:instab/services/notification_service.dart';
-import 'package:instab/services/app_detection_service.dart';
 import 'package:instab/services/timer_service.dart';
+import 'package:instab/services/native_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,10 +14,6 @@ void main() async {
   // Initialiser le service de notifications
   final notificationService = NotificationService();
   await notificationService.initialize();
-  
-  // Initialiser le service de détection d'applications
-  final appDetectionService = AppDetectionService();
-  await appDetectionService.initialize();
   
   runApp(
     MultiProvider(
@@ -54,7 +50,6 @@ class MonitoringPage extends StatefulWidget {
 }
 
 class _MonitoringPageState extends State<MonitoringPage> {
-  final AppDetectionService _appDetectionService = AppDetectionService();
   late StreamSubscription<String> _appDetectionSubscription;
   String _currentApp = "Surveillance en cours...";
   bool _permissionGranted = false;
@@ -79,7 +74,9 @@ class _MonitoringPageState extends State<MonitoringPage> {
     debugPrint('📱 Usage stats permission: $usagePermission');
     
     if (_permissionGranted) {
-      _startMonitoringAutomatically();
+      // Démarrer SEULEMENT le service Android natif
+      await NativeService.startMonitoringService();
+      debugPrint('📱 Service Android natif démarré - Service Flutter désactivé');
     } else {
       _showPermissionDialog();
     }
@@ -145,29 +142,16 @@ class _MonitoringPageState extends State<MonitoringPage> {
   }
 
   void _setupAppDetectionListener() {
-    _appDetectionSubscription = _appDetectionService.onAppDetected.listen((appName) {
-      setState(() {
-        _currentApp = appName;
-      });
-      
-      // Si une app de réseaux sociaux est détectée
-      if (_appDetectionService.isSocialMediaApp(appName) ||
-          appName.contains("Instagram") || appName.contains("TikTok")) {
-        debugPrint('📱 Social media app detected: $appName - Starting tracking');
-        Provider.of<TimerService>(context, listen: false).startTracking(appName);
-      } else {
-        // Si l'utilisateur n'est plus sur une app de réseaux sociaux, arrêter le compteur
-        debugPrint('📱 Not a social media app: $appName - Pausing tracking');
-        Provider.of<TimerService>(context, listen: false).pauseTracking();
-      }
+    // Désactiver complètement l'écoute du service Flutter
+    // car le service Android natif gère tout maintenant
+    _appDetectionSubscription = Stream<String>.empty().listen((_) {});
+    
+    // Simuler un état par défaut
+    setState(() {
+      _currentApp = "Service Android natif actif";
     });
   }
   
-  void _startMonitoringAutomatically() {
-    debugPrint('📱 Starting automatic monitoring');
-    _appDetectionService.startMonitoring();
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -304,14 +288,72 @@ class _MonitoringPageState extends State<MonitoringPage> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.green),
                 ),
-                child: const Column(
+                child: Column(
                   children: [
-                    Icon(Icons.check_circle, color: Colors.green, size: 32),
-                    SizedBox(height: 8),
-                    Text(
-                      '✅ Toutes les permissions sont accordées!\nLe service Android natif surveille maintenant Instagram et TikTok en arrière-plan.',
+                    const Icon(Icons.check_circle, color: Colors.green, size: 32),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '✅ Permissions accordées! Service natif actif.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.play_arrow),
+                          label: const Text('REDÉMARRER'),
+                          onPressed: () async {
+                            await NativeService.startMonitoringService();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Service Android redémarré'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.camera_alt),
+                          label: const Text('TESTER INSTAGRAM'),
+                          onPressed: () async {
+                            await NativeService.simulateInstagram();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Test Instagram lancé'),
+                                backgroundColor: Colors.pink,
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.pink,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.video_library),
+                      label: const Text('TESTER TIKTOK'),
+                      onPressed: () async {
+                        await NativeService.simulateTikTok();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Test TikTok lancé'),
+                            backgroundColor: Colors.black,
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                   ],
                 ),
@@ -388,7 +430,6 @@ class _MonitoringPageState extends State<MonitoringPage> {
   @override
   void dispose() {
     _appDetectionSubscription.cancel();
-    _appDetectionService.dispose();
     super.dispose();
   }
 }
