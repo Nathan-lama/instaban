@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:usage_stats/usage_stats.dart'; // Ajout de cet import
 
 import 'package:instab/services/notification_service.dart';
 import 'package:instab/services/app_detection_service.dart';
@@ -13,6 +14,10 @@ void main() async {
   // Initialiser le service de notifications
   final notificationService = NotificationService();
   await notificationService.initialize();
+  
+  // Initialiser le service de détection d'applications
+  final appDetectionService = AppDetectionService();
+  await appDetectionService.initialize();
   
   runApp(
     MultiProvider(
@@ -52,15 +57,93 @@ class _MonitoringPageState extends State<MonitoringPage> {
   final AppDetectionService _appDetectionService = AppDetectionService();
   late StreamSubscription<String> _appDetectionSubscription;
   String _currentApp = "Surveillance en cours...";
+  bool _permissionGranted = false;
   
   @override
   void initState() {
     super.initState();
-    // Démarre automatiquement le monitoring au lancement de l'app
+    _checkPermissions();
     _setupAppDetectionListener();
-    _startMonitoringAutomatically();
   }
   
+  Future<void> _checkPermissions() async {
+    // Vérifier les permissions de notifications et d'usage des applications
+    var notifPermission = await Permission.notification.status;
+    bool usagePermission = await UsageStats.checkUsagePermission() ?? false;
+    
+    setState(() {
+      _permissionGranted = notifPermission.isGranted && usagePermission;
+    });
+    
+    debugPrint('📱 Notification permission: ${notifPermission.isGranted}');
+    debugPrint('📱 Usage stats permission: $usagePermission');
+    
+    if (_permissionGranted) {
+      _startMonitoringAutomatically();
+    } else {
+      _showPermissionDialog();
+    }
+  }
+  
+  void _showPermissionDialog() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showDialog(
+        context: context, 
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('🔐 Permissions requises'),
+            content: const Text(
+              'Cette application a besoin de 2 permissions critiques:\n\n'
+              '1️⃣ NOTIFICATIONS: Pour vous alerter\n'
+              '2️⃣ ACCÈS AUX DONNÉES D\'UTILISATION: Pour détecter Instagram/TikTok\n\n'
+              '⚠️ Sans ces permissions, l\'application ne peut pas fonctionner.\n\n'
+              'Après avoir cliqué "Ouvrir les paramètres":\n'
+              '• Allez dans "Autorisations spéciales"\n'
+              '• Activez "Accès aux données d\'utilisation"\n'
+              '• Puis revenez à l\'application'
+            ),
+            actions: [
+              TextButton(
+                child: const Text('Ouvrir les paramètres'),
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  
+                  // D'abord essayer d'ouvrir directement les permissions d'usage
+                  try {
+                    await UsageStats.grantUsagePermission();
+                  } catch (e) {
+                    // Si ça ne marche pas, ouvrir les paramètres généraux
+                    await openAppSettings();
+                  }
+                  
+                  // Montrer un message d'aide
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Allez dans "Autorisations spéciales" → "Accès aux données d\'utilisation" → Activez pour cette app',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      backgroundColor: Colors.blue,
+                      duration: Duration(seconds: 8),
+                    ),
+                  );
+                },
+              ),
+              TextButton(
+                child: const Text('Vérifier à nouveau'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _checkPermissions();
+                },
+              ),
+            ],
+          );
+        }
+      );
+    });
+  }
+
   void _setupAppDetectionListener() {
     _appDetectionSubscription = _appDetectionService.onAppDetected.listen((appName) {
       setState(() {
@@ -70,15 +153,18 @@ class _MonitoringPageState extends State<MonitoringPage> {
       // Si une app de réseaux sociaux est détectée
       if (_appDetectionService.isSocialMediaApp(appName) ||
           appName.contains("Instagram") || appName.contains("TikTok")) {
+        debugPrint('📱 Social media app detected: $appName - Starting tracking');
         Provider.of<TimerService>(context, listen: false).startTracking(appName);
       } else {
         // Si l'utilisateur n'est plus sur une app de réseaux sociaux, arrêter le compteur
+        debugPrint('📱 Not a social media app: $appName - Pausing tracking');
         Provider.of<TimerService>(context, listen: false).pauseTracking();
       }
     });
   }
   
   void _startMonitoringAutomatically() {
+    debugPrint('📱 Starting automatic monitoring');
     _appDetectionService.startMonitoring();
   }
 
@@ -113,12 +199,14 @@ class _MonitoringPageState extends State<MonitoringPage> {
               color: Colors.red,
             ),
             const SizedBox(height: 20),
-            const Text(
-              'Surveillance active en arrière-plan',
+            Text(
+              _permissionGranted 
+                ? 'Surveillance active en arrière-plan' 
+                : 'En attente des permissions...',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.red,
+                color: _permissionGranted ? Colors.red : Colors.orange,
               ),
             ),
             const SizedBox(height: 20),
@@ -166,6 +254,70 @@ class _MonitoringPageState extends State<MonitoringPage> {
                 }
               },
             ),
+            const SizedBox(height: 20),
+            // Bouton d'aide pour les permissions
+            if (!_permissionGranted) ...[
+              ElevatedButton.icon(
+                icon: const Icon(Icons.settings_applications),
+                label: const Text('ACTIVER LES PERMISSIONS'),
+                onPressed: () async {
+                  try {
+                    await UsageStats.grantUsagePermission();
+                  } catch (e) {
+                    await openAppSettings();
+                  }
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Cherchez "Accès aux données d\'utilisation" dans les permissions spéciales',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      backgroundColor: Colors.blue,
+                      duration: Duration(seconds: 6),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('VÉRIFIER LES PERMISSIONS'),
+                onPressed: () {
+                  _checkPermissions();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green),
+                ),
+                child: const Column(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green, size: 32),
+                    SizedBox(height: 8),
+                    Text(
+                      '✅ Toutes les permissions sont accordées!\nLe service Android natif surveille maintenant Instagram et TikTok en arrière-plan.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            
             const SizedBox(height: 20),
             // Bouton de test amélioré
             ElevatedButton.icon(

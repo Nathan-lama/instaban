@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.instab"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35  // Augmenter la version de compilation
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -25,8 +25,8 @@ android {
         applicationId = "com.example.instab"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 22 // Augmentation de 21 à 22 pour supporter usage_stats
+        targetSdk = 34  // Réduire targetSdk pour éviter les restrictions trop strictes
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
